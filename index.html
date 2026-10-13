@@ -279,29 +279,6 @@
             font-family: monospace;
             font-size: 0.85rem;
         }
-
-        .history-row {
-            display: grid;
-            grid-template-columns: 40px 1fr 1fr;
-            padding: 2px 0;
-        }
-        .history-row:nth-child(even) { background: #0a0a0a; }
-
-        /* OVERLAY FOR GAME OVER */
-        .overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.85);
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            z-index: 10;
-            gap: 15px;
-            border-radius: 4px;
-        }
-
-        .overlay h2 { font-size: 2rem; color: var(--accent-gold); }
     </style>
 </head>
 <body>
@@ -396,7 +373,6 @@ let boardState = Array(8).fill(null).map(() => Array(8).fill(null));
 let turn = 'w';
 let selectedSquare = null;
 let validMoves = [];
-let moveHistory = [];
 let gameStage = 'SETUP'; // 'SETUP' or 'PLAYING' or 'GAMEOVER'
 let myColor = 'w'; // Default Host = 'w', Guest = 'b'
 let isHost = false;
@@ -477,10 +453,10 @@ function handleSquareClick(row, col) {
     if (gameStage === 'SETUP') {
         if (myLockedIn) return;
         const targetRow = (myColor === 'w') ? 7 : 0;
-        if (row !== targetRow) return; // Can only swap back row
+        if (row !== targetRow) return;
 
         const piece = boardState[row][col];
-        if (!piece || piece.type === 'K') return; // Cannot swap King
+        if (!piece || piece.type === 'K') return;
 
         if (!selectedSquare) {
             selectedSquare = { r: row, c: col };
@@ -502,12 +478,11 @@ function handleSquareClick(row, col) {
 
     // ACTIVE GAMEPLAY MOVE HANDLING
     if (gameStage === 'PLAYING') {
-        if (turn !== myColor) return; // Not your turn
+        if (turn !== myColor) return;
 
         const clickedPiece = boardState[row][col];
 
         if (selectedSquare) {
-            // Check if clicking a valid move
             const move = validMoves.find(m => m.r === row && m.c === col);
             if (move) {
                 executeMove(selectedSquare.r, selectedSquare.c, row, col);
@@ -518,7 +493,6 @@ function handleSquareClick(row, col) {
             }
         }
 
-        // Select own piece
         if (clickedPiece && clickedPiece.color === myColor) {
             selectedSquare = { r: row, c: col };
             validMoves = getBasicValidMoves(row, col);
@@ -530,7 +504,7 @@ function handleSquareClick(row, col) {
     }
 }
 
-// Simple Move Generator (Basic Chess Logic)
+// Basic Move Generator
 function getBasicValidMoves(r, c) {
     const p = boardState[r][c];
     if (!p) return [];
@@ -544,7 +518,6 @@ function getBasicValidMoves(r, c) {
         return false;
     };
 
-    // Pawns
     if (p.type === 'P') {
         const dir = (p.color === 'w') ? -1 : 1;
         if (r + dir >= 0 && r + dir <= 7 && !boardState[r + dir][c]) {
@@ -554,7 +527,6 @@ function getBasicValidMoves(r, c) {
                 moves.push({ r: r + 2 * dir, c: c });
             }
         }
-        // Captures
         [-1, 1].forEach(dc => {
             const tr = r + dir, tc = c + dc;
             if (tr >= 0 && tr <= 7 && tc >= 0 && tc <= 7) {
@@ -562,15 +534,12 @@ function getBasicValidMoves(r, c) {
             }
         });
     }
-    // Knights
     else if (p.type === 'N') {
         [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr,dc]) => addMove(r+dr, c+dc));
     }
-    // Kings
     else if (p.type === 'K') {
         [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr,dc]) => addMove(r+dr, c+dc));
     }
-    // Rooks / Queens / Bishops
     else {
         const dirs = [];
         if (p.type === 'R' || p.type === 'Q') dirs.push([-1,0],[1,0],[0,-1],[0,1]);
@@ -584,49 +553,37 @@ function getBasicValidMoves(r, c) {
     return moves;
 }
 
-// Execute move on local state
 function executeMove(fr, fc, tr, tc) {
     const p = boardState[fr][fc];
-    const target = boardState[tr][tc];
-
     boardState[tr][tc] = p;
     boardState[fr][fc] = null;
     p.moved = true;
 
-    // Log History
     const pName = DEADLOCK_ROSTER[p.color][p.type].name;
-    const notation = `${pName}: (${fr},${fc}) ➔ (${tr},${tc})`;
-    addHistoryLog(notation);
+    addHistoryLog(`${pName}: (${fr},${fc}) ➔ (${tr},${tc})`);
 
-    // Switch turn
     turn = (turn === 'w') ? 'b' : 'w';
     updateClockHighlights();
     renderBoard();
 }
 
-// Randomize Back Row for Setup
 function randomizeBackRow() {
     if (myLockedIn || gameStage !== 'SETUP') return;
     const r = (myColor === 'w') ? 7 : 0;
     const pieces = ['R', 'N', 'B', 'Q', 'B', 'N', 'R'];
-    // Shuffle
     for (let i = pieces.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [pieces[i], pieces[j]] = [pieces[j], pieces[i]];
     }
-    
-    // Re-assign excluding King at col 4
     let idx = 0;
     for (let c = 0; c < 8; c++) {
         if (c === 4) continue;
         boardState[r][c].type = pieces[idx++];
     }
-
     renderBoard();
     sendPacket({ type: 'SYNC_FULL_BOARD', board: boardState });
 }
 
-// Lock In Ready State
 function toggleLockIn() {
     myLockedIn = !myLockedIn;
     const btn = document.getElementById('btn-lock-in');
@@ -634,7 +591,6 @@ function toggleLockIn() {
     btn.className = myLockedIn ? "btn btn-primary" : "btn btn-warning";
 
     sendPacket({ type: 'LOCK_IN', locked: myLockedIn });
-
     checkBothReady();
 }
 
@@ -648,7 +604,6 @@ function checkBothReady() {
     }
 }
 
-// CLOCK LOGIC
 function startClock() {
     clearInterval(clockInterval);
     clockInterval = setInterval(() => {
@@ -694,27 +649,41 @@ function addHistoryLog(msg) {
 }
 
 // =================================================================
-// PEERJS MULTIPLAYER NETWORKING (LICHESS-STYLE P2P)
+// REVISED ROBUST PEERJS MULTIPLAYER NETWORKING (2-WAY HANDSHAKE)
 // =================================================================
 
 function initPeer() {
-    // Generate random 5 character ID
     const shortId = 'DL-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-    peer = new Peer(shortId);
+    
+    // Explicit public STUN server configuration to handle NAT traversal
+    peer = new Peer(shortId, {
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+        }
+    });
 
     peer.on('open', (id) => {
         currentRoomId = id;
         document.getElementById('current-room-id').innerText = id;
     });
 
+    // HOST EVENT
     peer.on('connection', (connection) => {
         conn = connection;
         isHost = true;
         myColor = 'w';
-        setupConnectionListeners();
-        updateNetworkUI(true);
-        // Sync initial state to joining guest
-        sendPacket({ type: 'INIT_GUEST', board: boardState, time: initialTime });
+        
+        setupDataListeners();
+
+        // When connection opens on Host side, send HANDSHAKE to Guest
+        conn.on('open', () => {
+            updateNetworkUI(true);
+            // Host sends handshake ping
+            sendPacket({ type: 'HANDSHAKE_PING' });
+        });
     });
 }
 
@@ -730,12 +699,18 @@ function joinRoom(roomId) {
     if (!roomId) return;
     myColor = 'b';
     isHost = false;
-    
-    // Connect to Host
+
+    // Connect to host with standard reliable setting
     conn = peer.connect(roomId.toUpperCase(), { reliable: true });
-    
-    // ATTACH LISTENERS IMMEDIATELY
-    setupConnectionListeners();
+
+    setupDataListeners();
+
+    conn.on('open', () => {
+        // Guest marks connected locally when socket opens
+        updateNetworkUI(true);
+        // Reply back to host
+        sendPacket({ type: 'HANDSHAKE_ACK' });
+    });
 }
 
 function joinRoomFromInput() {
@@ -749,18 +724,8 @@ function copyRoomLink() {
     alert("Room link copied to clipboard!");
 }
 
-function setupConnectionListeners() {
+function setupDataListeners() {
     if (!conn) return;
-
-    conn.on('open', () => {
-        // Both sides switch status to Connected as soon as the WebRTC pipe opens
-        updateNetworkUI(true);
-        
-        // If Host, send initial board state and time to Guest
-        if (isHost) {
-            sendPacket({ type: 'INIT_GUEST', board: boardState, time: initialTime });
-        }
-    });
 
     conn.on('data', (data) => {
         handleIncomingPacket(data);
@@ -770,7 +735,7 @@ function setupConnectionListeners() {
         updateNetworkUI(false);
         alert("Opponent disconnected.");
     });
-    
+
     conn.on('error', (err) => {
         console.error("Connection Error:", err);
         updateNetworkUI(false);
@@ -785,6 +750,24 @@ function sendPacket(data) {
 
 function handleIncomingPacket(data) {
     switch (data.type) {
+        case 'HANDSHAKE_PING':
+            // Guest received ping from Host -> mark UI connected & request board sync
+            updateNetworkUI(true);
+            sendPacket({ type: 'REQUEST_SYNC' });
+            break;
+
+        case 'HANDSHAKE_ACK':
+            // Host received ack from Guest -> sync full board state
+            updateNetworkUI(true);
+            sendPacket({ type: 'INIT_GUEST', board: boardState, time: initialTime });
+            break;
+
+        case 'REQUEST_SYNC':
+            if (isHost) {
+                sendPacket({ type: 'INIT_GUEST', board: boardState, time: initialTime });
+            }
+            break;
+
         case 'INIT_GUEST':
             boardState = data.board;
             initialTime = data.time;
@@ -852,7 +835,6 @@ function resignGame() {
     }
 }
 
-// Auto Join via URL Param ?room=DL-XXXX
 window.onload = () => {
     initBoard();
     renderBoard();
@@ -861,7 +843,7 @@ window.onload = () => {
     const urlParams = new URLSearchParams(window.location.search);
     const roomParam = urlParams.get('room');
     if (roomParam) {
-        setTimeout(() => joinRoom(roomParam), 1000);
+        setTimeout(() => joinRoom(roomParam), 1200);
     }
 };
 </script>
