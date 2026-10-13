@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deadlock Tactical Chess - P2P Multiplayer</title>
+    <!-- PeerJS for WebRTC Multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #0d0f12;
+            --panel-bg: #161b22;
+            --border-color: #30363d;
+            --accent-gold: #e2b714;
+            --accent-red: #da3633;
+            --accent-blue: #2f81f7;
+            --text-main: #c9d1d9;
+            --text-muted: #8b949e;
+            --board-light: #2d333b;
+            --board-dark: #1c2128;
+            --sq-highlight: rgba(226, 183, 20, 0.4);
+            --sq-selected: rgba(47, 129, 247, 0.5);
+            --sq-lastmove: rgba(46, 160, 67, 0.35);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 15px;
+        }
+
+        .game-wrapper {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 20px;
+            max-width: 1250px;
+            width: 100%;
+        }
+
+        @media (max-width: 950px) {
+            .game-wrapper {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* BOARD STYLING */
+        .board-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .player-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            max-width: 600px;
+            background: var(--panel-bg);
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .player-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+
+        .player-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .avatar-white { background: #e6e6e6; color: #111; }
+        .avatar-black { background: #222; color: #fff; border: 1px solid #555; }
+
+        .timer-badge {
+            font-family: monospace;
+            font-size: 1.25rem;
+            background: #000;
+            padding: 4px 12px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            color: var(--accent-gold);
+            min-width: 80px;
+            text-align: center;
+        }
+
+        .timer-badge.active {
+            border-color: var(--accent-gold);
+            box-shadow: 0 0 8px rgba(226, 183, 20, 0.4);
+        }
+
+        .chessboard {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 1 / 1;
+            border: 3px solid var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+            position: relative;
+        }
+
+        .square {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .square.light { background-color: var(--board-light); }
+        .square.dark { background-color: var(--board-dark); }
+        .square.selected { background-color: var(--sq-selected) !important; }
+        .square.highlight { background-color: var(--sq-highlight) !important; }
+        .square.last-move { background-color: var(--sq-lastmove) !important; }
+
+        .piece {
+            width: 85%;
+            height: 85%;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 0.75rem;
+            font-weight: bold;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.4);
+            transition: transform 0.1s ease;
+            z-index: 2;
+        }
+
+        .piece:hover { transform: scale(1.05); }
+
+        .piece.w {
+            background: linear-gradient(135deg, #ffffff, #d6d6d6);
+            color: #111;
+            border: 2px solid #fff;
+        }
+
+        .piece.b {
+            background: linear-gradient(135deg, #2b2b2b, #111111);
+            color: #f0f0f0;
+            border: 2px solid #444;
+        }
+
+        .piece-icon {
+            font-size: 1.3rem;
+            line-height: 1;
+        }
+
+        .piece-name {
+            font-size: 0.55rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 1px;
+            opacity: 0.85;
+        }
+
+        /* SIDEBAR CONTROL PANEL */
+        .sidebar {
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .panel-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--accent-gold);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .network-section {
+            background: #000;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .room-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        input[type="text"] {
+            background: #111;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 12px;
+            border-radius: 4px;
+            width: 100%;
+            font-family: monospace;
+            text-transform: uppercase;
+        }
+
+        .btn {
+            background: #21262d;
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            padding: 8px 14px;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .btn:hover { background: #30363d; border-color: #8b949e; }
+        .btn-primary { background: #238636; color: #fff; border: none; }
+        .btn-primary:hover { background: #2ea043; }
+        .btn-warning { background: #d29922; color: #000; border: none; }
+        .btn-warning:hover { background: #e3b341; }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+        .status-disconnected { background: rgba(218, 54, 51, 0.2); color: var(--accent-red); }
+        .status-connected { background: rgba(46, 160, 67, 0.2); color: #3fb950; }
+
+        .setup-phase-box {
+            background: rgba(226, 183, 20, 0.1);
+            border: 1px solid var(--accent-gold);
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
+        .move-history {
+            flex-grow: 1;
+            background: #000;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px;
+            height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+
+        .history-row {
+            display: grid;
+            grid-template-columns: 40px 1fr 1fr;
+            padding: 2px 0;
+        }
+        .history-row:nth-child(even) { background: #0a0a0a; }
+
+        /* OVERLAY FOR GAME OVER */
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            gap: 15px;
+            border-radius: 4px;
+        }
+
+        .overlay h2 { font-size: 2rem; color: var(--accent-gold); }
+    </style>
+</head>
+<body>
+
+<div class="game-wrapper">
+    <!-- LEFT: CHESSBOARD -->
+    <div class="board-container">
+        <!-- TOP PLAYER (BLACK / OPPONENT) -->
+        <div class="player-bar">
+            <div class="player-info">
+                <div class="player-avatar avatar-black">B</div>
+                <span id="black-player-name">Opponent (Black)</span>
+            </div>
+            <div id="clock-b" class="timer-badge">10:00</div>
+        </div>
+
+        <!-- THE BOARD -->
+        <div id="board" class="chessboard"></div>
+
+        <!-- BOTTOM PLAYER (WHITE / LOCAL) -->
+        <div class="player-bar">
+            <div class="player-info">
+                <div class="player-avatar avatar-white">W</div>
+                <span id="white-player-name">You (White)</span>
+            </div>
+            <div id="clock-w" class="timer-badge active">10:00</div>
+        </div>
+    </div>
+
+    <!-- RIGHT: CONTROLS & MULTIPLAYER -->
+    <div class="sidebar">
+        <div class="panel-title">
+            <span>Deadlock Chess</span>
+            <span id="connection-status" class="status-badge status-disconnected">Offline</span>
+        </div>
+
+        <!-- MULTIPLAYER ROOM SETUP -->
+        <div class="network-section">
+            <div style="font-size: 0.8rem; color: var(--text-muted); font-weight: bold;">LICHESS-STYLE P2P ROOM</div>
+            <div class="room-controls">
+                <button id="btn-create-room" class="btn btn-primary" onclick="createRoom()" style="width: 50%;">Create Room</button>
+                <button id="btn-copy-link" class="btn" onclick="copyRoomLink()" style="width: 50%; display:none;">Copy Link</button>
+            </div>
+            <div class="room-controls">
+                <input type="text" id="join-room-input" placeholder="Enter Room Code (e.g. DL-8X)" />
+                <button class="btn" onclick="joinRoomFromInput()">Join</button>
+            </div>
+            <div id="room-code-display" style="font-size: 0.8rem; color: var(--accent-gold); font-family: monospace; display: none;">
+                Room ID: <strong id="current-room-id">--</strong>
+            </div>
+        </div>
+
+        <!-- PRE-GAME SWAP PHASE PANEL -->
+        <div id="setup-panel" class="setup-phase-box">
+            <strong>⚙️ Pre-Game Setup Phase</strong>
+            <p style="margin: 6px 0;">Click non-king pieces on your back row to swap starting positions!</p>
+            <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <button class="btn" onclick="randomizeBackRow()" style="width: 50%;">🔀 Randomize</button>
+                <button id="btn-lock-in" class="btn btn-warning" onclick="toggleLockIn()" style="width: 50%;">🔒 Lock In</button>
+            </div>
+        </div>
+
+        <!-- GAME TIMERS SELECTOR -->
+        <div id="timer-select-box">
+            <label style="font-size: 0.8rem; color: var(--text-muted); font-weight: bold;">TIME CONTROL</label>
+            <select id="time-control-select" onchange="changeTimeControl()" style="width:100%; background:#111; color:#fff; border:1px solid var(--border-color); padding:6px; border-radius:4px; margin-top:4px;">
+                <option value="60">1 Min (Bullet)</option>
+                <option value="180">3 Min (Blitz)</option>
+                <option value="600" selected>10 Min (Rapid)</option>
+            </select>
+        </div>
+
+        <!-- MOVE HISTORY -->
+        <div style="font-size: 0.8rem; color: var(--text-muted); font-weight: bold;">MOVE LOG</div>
+        <div id="move-history" class="move-history"></div>
+
+        <button id="btn-resign" class="btn" onclick="resignGame()" style="background: rgba(218,54,51,0.2); color: var(--accent-red); border-color: var(--accent-red);">Resign Match</button>
+    </div>
+</div>
+
+<script>
+/**
+ * DEADLOCK CHARACTER MAPPING
+ */
+const DEADLOCK_ROSTER = {
+    'w': { 'K': { name: 'Abrams', icon: '♔' }, 'Q': { name: 'Yamato', icon: '♕' }, 'R': { name: 'Seven', icon: '♖' }, 'B': { name: 'Paradox', icon: '♗' }, 'N': { name: 'Bebop', icon: '♘' }, 'P': { name: 'Trooper', icon: '♙' } },
+    'b': { 'K': { name: 'Geist', icon: '♚' }, 'Q': { name: 'Vindicta', icon: '♛' }, 'R': { name: 'Shiv', icon: '♜' }, 'B': { name: 'Pocket', icon: '♝' }, 'N': { name: 'Dynamo', icon: '♞' }, 'P': { name: 'Trooper', icon: '♟' } }
+};
+
+// State Variables
+let boardState = Array(8).fill(null).map(() => Array(8).fill(null));
+let turn = 'w';
+let selectedSquare = null;
+let validMoves = [];
+let moveHistory = [];
+let gameStage = 'SETUP'; // 'SETUP' or 'PLAYING' or 'GAMEOVER'
+let myColor = 'w'; // Default Host = 'w', Guest = 'b'
+let isHost = false;
+let myLockedIn = false;
+let peerLockedIn = false;
+
+// PeerJS Connection
+let peer = null;
+let conn = null;
+let currentRoomId = null;
+
+// Clocks
+let initialTime = 600;
+let timeLeft = { 'w': 600, 'b': 600 };
+let clockInterval = null;
+
+// Board setup initial configuration
+function initBoard() {
+    boardState = Array(8).fill(null).map(() => Array(8).fill(null));
+    const backRow = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'];
+    
+    for (let col = 0; col < 8; col++) {
+        boardState[0][col] = { color: 'b', type: backRow[col], moved: false };
+        boardState[1][col] = { color: 'b', type: 'P', moved: false };
+        boardState[6][col] = { color: 'w', type: 'P', moved: false };
+        boardState[7][col] = { color: 'w', type: backRow[col], moved: false };
+    }
+}
+
+// Render Board GUI
+function renderBoard() {
+    const boardEl = document.getElementById('board');
+    boardEl.innerHTML = '';
+
+    const isFlipped = (myColor === 'b');
+
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const row = isFlipped ? 7 - r : r;
+            const col = isFlipped ? 7 - c : c;
+
+            const sq = document.createElement('div');
+            sq.className = `square ${(row + col) % 2 === 0 ? 'light' : 'dark'}`;
+            sq.dataset.row = row;
+            sq.dataset.col = col;
+
+            // Highlight logic
+            if (selectedSquare && selectedSquare.r === row && selectedSquare.c === col) {
+                sq.classList.add('selected');
+            }
+            if (validMoves.some(m => m.r === row && m.c === col)) {
+                sq.classList.add('highlight');
+            }
+
+            const piece = boardState[row][col];
+            if (piece) {
+                const pEl = document.createElement('div');
+                pEl.className = `piece ${piece.color}`;
+                const charData = DEADLOCK_ROSTER[piece.color][piece.type];
+                pEl.innerHTML = `
+                    <span class="piece-icon">${charData.icon}</span>
+                    <span class="piece-name">${charData.name}</span>
+                `;
+                sq.appendChild(pEl);
+            }
+
+            sq.addEventListener('click', () => handleSquareClick(row, col));
+            boardEl.appendChild(sq);
+        }
+    }
+}
+
+// Square Click Handler
+function handleSquareClick(row, col) {
+    if (gameStage === 'GAMEOVER') return;
+
+    // PRE-GAME SETUP PHASE SWAPPING
+    if (gameStage === 'SETUP') {
+        if (myLockedIn) return;
+        const targetRow = (myColor === 'w') ? 7 : 0;
+        if (row !== targetRow) return; // Can only swap back row
+
+        const piece = boardState[row][col];
+        if (!piece || piece.type === 'K') return; // Cannot swap King
+
+        if (!selectedSquare) {
+            selectedSquare = { r: row, c: col };
+        } else {
+            if (selectedSquare.r === targetRow && (boardState[selectedSquare.r][selectedSquare.c]?.type !== 'K')) {
+                // Execute Swap
+                const temp = boardState[selectedSquare.r][selectedSquare.c];
+                boardState[selectedSquare.r][selectedSquare.c] = boardState[row][col];
+                boardState[row][col] = temp;
+
+                // Sync swap over WebRTC
+                sendPacket({ type: 'SWAP_BACKROW', row1: selectedSquare.r, col1: selectedSquare.c, row2: row, col2: col });
+            }
+            selectedSquare = null;
+        }
+        renderBoard();
+        return;
+    }
+
+    // ACTIVE GAMEPLAY MOVE HANDLING
+    if (gameStage === 'PLAYING') {
+        if (turn !== myColor) return; // Not your turn
+
+        const clickedPiece = boardState[row][col];
+
+        if (selectedSquare) {
+            // Check if clicking a valid move
+            const move = validMoves.find(m => m.r === row && m.c === col);
+            if (move) {
+                executeMove(selectedSquare.r, selectedSquare.c, row, col);
+                sendPacket({ type: 'MOVE', fromR: selectedSquare.r, fromC: selectedSquare.c, toR: row, toC: col });
+                selectedSquare = null;
+                validMoves = [];
+                return;
+            }
+        }
+
+        // Select own piece
+        if (clickedPiece && clickedPiece.color === myColor) {
+            selectedSquare = { r: row, c: col };
+            validMoves = getBasicValidMoves(row, col);
+        } else {
+            selectedSquare = null;
+            validMoves = [];
+        }
+        renderBoard();
+    }
+}
+
+// Simple Move Generator (Basic Chess Logic)
+function getBasicValidMoves(r, c) {
+    const p = boardState[r][c];
+    if (!p) return [];
+    const moves = [];
+
+    const addMove = (tr, tc) => {
+        if (tr < 0 || tr > 7 || tc < 0 || tc > 7) return false;
+        const dest = boardState[tr][tc];
+        if (!dest) { moves.push({ r: tr, c: tc }); return true; }
+        if (dest.color !== p.color) { moves.push({ r: tr, c: tc }); }
+        return false;
+    };
+
+    // Pawns
+    if (p.type === 'P') {
+        const dir = (p.color === 'w') ? -1 : 1;
+        if (r + dir >= 0 && r + dir <= 7 && !boardState[r + dir][c]) {
+            moves.push({ r: r + dir, c: c });
+            const startRow = (p.color === 'w') ? 6 : 1;
+            if (r === startRow && !boardState[r + 2 * dir][c]) {
+                moves.push({ r: r + 2 * dir, c: c });
+            }
+        }
+        // Captures
+        [-1, 1].forEach(dc => {
+            const tr = r + dir, tc = c + dc;
+            if (tr >= 0 && tr <= 7 && tc >= 0 && tc <= 7) {
+                if (boardState[tr][tc] && boardState[tr][tc].color !== p.color) moves.push({ r: tr, c: tc });
+            }
+        });
+    }
+    // Knights
+    else if (p.type === 'N') {
+        [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr,dc]) => addMove(r+dr, c+dc));
+    }
+    // Kings
+    else if (p.type === 'K') {
+        [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr,dc]) => addMove(r+dr, c+dc));
+    }
+    // Rooks / Queens / Bishops
+    else {
+        const dirs = [];
+        if (p.type === 'R' || p.type === 'Q') dirs.push([-1,0],[1,0],[0,-1],[0,1]);
+        if (p.type === 'B' || p.type === 'Q') dirs.push([-1,-1],[-1,1],[1,-1],[1,1]);
+        dirs.forEach(([dr,dc]) => {
+            let step = 1;
+            while (addMove(r + dr * step, c + dc * step)) step++;
+        });
+    }
+
+    return moves;
+}
+
+// Execute move on local state
+function executeMove(fr, fc, tr, tc) {
+    const p = boardState[fr][fc];
+    const target = boardState[tr][tc];
+
+    boardState[tr][tc] = p;
+    boardState[fr][fc] = null;
+    p.moved = true;
+
+    // Log History
+    const pName = DEADLOCK_ROSTER[p.color][p.type].name;
+    const notation = `${pName}: (${fr},${fc}) ➔ (${tr},${tc})`;
+    addHistoryLog(notation);
+
+    // Switch turn
+    turn = (turn === 'w') ? 'b' : 'w';
+    updateClockHighlights();
+    renderBoard();
+}
+
+// Randomize Back Row for Setup
+function randomizeBackRow() {
+    if (myLockedIn || gameStage !== 'SETUP') return;
+    const r = (myColor === 'w') ? 7 : 0;
+    const pieces = ['R', 'N', 'B', 'Q', 'B', 'N', 'R'];
+    // Shuffle
+    for (let i = pieces.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pieces[i], pieces[j]] = [pieces[j], pieces[i]];
+    }
+    
+    // Re-assign excluding King at col 4
+    let idx = 0;
+    for (let c = 0; c < 8; c++) {
+        if (c === 4) continue;
+        boardState[r][c].type = pieces[idx++];
+    }
+
+    renderBoard();
+    sendPacket({ type: 'SYNC_FULL_BOARD', board: boardState });
+}
+
+// Lock In Ready State
+function toggleLockIn() {
+    myLockedIn = !myLockedIn;
+    const btn = document.getElementById('btn-lock-in');
+    btn.innerText = myLockedIn ? "✅ Ready" : "🔒 Lock In";
+    btn.className = myLockedIn ? "btn btn-primary" : "btn btn-warning";
+
+    sendPacket({ type: 'LOCK_IN', locked: myLockedIn });
+
+    checkBothReady();
+}
+
+function checkBothReady() {
+    if (myLockedIn && peerLockedIn) {
+        gameStage = 'PLAYING';
+        document.getElementById('setup-panel').style.display = 'none';
+        document.getElementById('timer-select-box').style.display = 'none';
+        startClock();
+        addHistoryLog("⚔️ Game Started!");
+    }
+}
+
+// CLOCK LOGIC
+function startClock() {
+    clearInterval(clockInterval);
+    clockInterval = setInterval(() => {
+        if (gameStage !== 'PLAYING') return;
+        timeLeft[turn]--;
+        updateClockDisplay();
+
+        if (timeLeft[turn] <= 0) {
+            clearInterval(clockInterval);
+            gameStage = 'GAMEOVER';
+            const winner = (turn === 'w') ? 'Black' : 'White';
+            alert(`⏱️ Time out! ${winner} wins!`);
+        }
+    }, 1000);
+}
+
+function updateClockDisplay() {
+    ['w', 'b'].forEach(c => {
+        const mins = Math.floor(timeLeft[c] / 60).toString().padStart(2, '0');
+        const secs = (timeLeft[c] % 60).toString().padStart(2, '0');
+        document.getElementById(`clock-${c}`).innerText = `${mins}:${secs}`;
+    });
+}
+
+function updateClockHighlights() {
+    document.getElementById('clock-w').className = `timer-badge ${turn === 'w' ? 'active' : ''}`;
+    document.getElementById('clock-b').className = `timer-badge ${turn === 'b' ? 'active' : ''}`;
+}
+
+function changeTimeControl() {
+    initialTime = parseInt(document.getElementById('time-control-select').value);
+    timeLeft = { 'w': initialTime, 'b': initialTime };
+    updateClockDisplay();
+    sendPacket({ type: 'TIME_CHANGE', time: initialTime });
+}
+
+function addHistoryLog(msg) {
+    const el = document.getElementById('move-history');
+    const entry = document.createElement('div');
+    entry.innerText = msg;
+    el.appendChild(entry);
+    el.scrollTop = el.scrollHeight;
+}
+
+// =================================================================
+// PEERJS MULTIPLAYER NETWORKING (LICHESS-STYLE P2P)
+// =================================================================
+
+function initPeer() {
+    // Generate random 5 character ID
+    const shortId = 'DL-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+    peer = new Peer(shortId);
+
+    peer.on('open', (id) => {
+        currentRoomId = id;
+        document.getElementById('current-room-id').innerText = id;
+    });
+
+    peer.on('connection', (connection) => {
+        conn = connection;
+        isHost = true;
+        myColor = 'w';
+        setupConnectionListeners();
+        updateNetworkUI(true);
+        // Sync initial state to joining guest
+        sendPacket({ type: 'INIT_GUEST', board: boardState, time: initialTime });
+    });
+}
+
+function createRoom() {
+    if (!currentRoomId) return;
+    document.getElementById('room-code-display').style.display = 'block';
+    document.getElementById('btn-copy-link').style.display = 'inline-block';
+    document.getElementById('btn-create-room').style.display = 'none';
+    alert(`Room Created! Share Room Code: ${currentRoomId}`);
+}
+
+function joinRoom(roomId) {
+    if (!roomId) return;
+    myColor = 'b';
+    isHost = false;
+    conn = peer.connect(roomId.toUpperCase());
+    setupConnectionListeners();
+}
+
+function joinRoomFromInput() {
+    const val = document.getElementById('join-room-input').value.trim();
+    if (val) joinRoom(val);
+}
+
+function copyRoomLink() {
+    const url = `${window.location.origin}${window.location.pathname}?room=${currentRoomId}`;
+    navigator.clipboard.writeText(url);
+    alert("Room link copied to clipboard!");
+}
+
+function setupConnectionListeners() {
+    conn.on('open', () => {
+        updateNetworkUI(true);
+    });
+
+    conn.on('data', (data) => {
+        handleIncomingPacket(data);
+    });
+
+    conn.on('close', () => {
+        updateNetworkUI(false);
+        alert("Opponent disconnected.");
+    });
+}
+
+function sendPacket(data) {
+    if (conn && conn.open) {
+        conn.send(data);
+    }
+}
+
+function handleIncomingPacket(data) {
+    switch (data.type) {
+        case 'INIT_GUEST':
+            boardState = data.board;
+            initialTime = data.time;
+            timeLeft = { 'w': initialTime, 'b': initialTime };
+            updateClockDisplay();
+            renderBoard();
+            break;
+
+        case 'SWAP_BACKROW':
+            const temp = boardState[data.row1][data.col1];
+            boardState[data.row1][data.col1] = boardState[data.row2][data.col2];
+            boardState[data.row2][data.col2] = temp;
+            renderBoard();
+            break;
+
+        case 'SYNC_FULL_BOARD':
+            boardState = data.board;
+            renderBoard();
+            break;
+
+        case 'LOCK_IN':
+            peerLockedIn = data.locked;
+            checkBothReady();
+            break;
+
+        case 'MOVE':
+            executeMove(data.fromR, data.fromC, data.toR, data.toC);
+            break;
+
+        case 'TIME_CHANGE':
+            initialTime = data.time;
+            timeLeft = { 'w': initialTime, 'b': initialTime };
+            updateClockDisplay();
+            break;
+
+        case 'RESIGN':
+            gameStage = 'GAMEOVER';
+            clearInterval(clockInterval);
+            alert("Opponent resigned. You win!");
+            break;
+    }
+}
+
+function updateNetworkUI(connected) {
+    const badge = document.getElementById('connection-status');
+    if (connected) {
+        badge.innerText = "Connected";
+        badge.className = "status-badge status-connected";
+        document.getElementById('white-player-name').innerText = isHost ? "You (White)" : "Opponent (White)";
+        document.getElementById('black-player-name').innerText = isHost ? "Opponent (Black)" : "You (Black)";
+        renderBoard();
+    } else {
+        badge.innerText = "Offline";
+        badge.className = "status-badge status-disconnected";
+    }
+}
+
+function resignGame() {
+    if (gameStage === 'GAMEOVER') return;
+    if (confirm("Are you sure you want to resign?")) {
+        gameStage = 'GAMEOVER';
+        clearInterval(clockInterval);
+        sendPacket({ type: 'RESIGN' });
+        alert("You resigned. Match over.");
+    }
+}
+
+// Auto Join via URL Param ?room=DL-XXXX
+window.onload = () => {
+    initBoard();
+    renderBoard();
+    initPeer();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomParam = urlParams.get('room');
+    if (roomParam) {
+        setTimeout(() => joinRoom(roomParam), 1000);
+    }
+};
+</script>
+</body>
+</html>
