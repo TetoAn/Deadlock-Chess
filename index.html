@@ -730,7 +730,11 @@ function joinRoom(roomId) {
     if (!roomId) return;
     myColor = 'b';
     isHost = false;
-    conn = peer.connect(roomId.toUpperCase());
+    
+    // Connect to Host
+    conn = peer.connect(roomId.toUpperCase(), { reliable: true });
+    
+    // ATTACH LISTENERS IMMEDIATELY
     setupConnectionListeners();
 }
 
@@ -746,8 +750,16 @@ function copyRoomLink() {
 }
 
 function setupConnectionListeners() {
+    if (!conn) return;
+
     conn.on('open', () => {
+        // Both sides switch status to Connected as soon as the WebRTC pipe opens
         updateNetworkUI(true);
+        
+        // If Host, send initial board state and time to Guest
+        if (isHost) {
+            sendPacket({ type: 'INIT_GUEST', board: boardState, time: initialTime });
+        }
     });
 
     conn.on('data', (data) => {
@@ -757,6 +769,11 @@ function setupConnectionListeners() {
     conn.on('close', () => {
         updateNetworkUI(false);
         alert("Opponent disconnected.");
+    });
+    
+    conn.on('error', (err) => {
+        console.error("Connection Error:", err);
+        updateNetworkUI(false);
     });
 }
 
